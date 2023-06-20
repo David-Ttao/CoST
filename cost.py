@@ -247,26 +247,26 @@ class CoST:
         self.n_epochs = 0
         self.n_iters = 0
 
-    def fit(self, train_data, n_epochs=None, n_iters=None, verbose=False):
-        assert train_data.ndim == 3
+    def fit(self, datalist, n_epochs=None, n_iters=None, verbose=False):
+        # assert train_data.ndim == 3
 
-        if n_iters is None and n_epochs is None:
-            n_iters = 200 if train_data.size <= 100000 else 600
+        # if n_iters is None and n_epochs is None:
+        #     n_iters = 200 if train_data.size <= 100000 else 600
+        n_iters = 200
+        # if self.max_train_length is not None:
+        #     sections = train_data.shape[1] // self.max_train_length
+        #     if sections >= 2:
+        #         train_data = np.concatenate(split_with_nan(train_data, sections, axis=1), axis=0)
 
-        if self.max_train_length is not None:
-            sections = train_data.shape[1] // self.max_train_length
-            if sections >= 2:
-                train_data = np.concatenate(split_with_nan(train_data, sections, axis=1), axis=0)
-
-        temporal_missing = np.isnan(train_data).all(axis=-1).any(axis=0)
-        if temporal_missing[0] or temporal_missing[-1]:
-            train_data = centerize_vary_length_series(train_data)
+        # temporal_missing = np.isnan(train_data).all(axis=-1).any(axis=0)
+        # if temporal_missing[0] or temporal_missing[-1]:
+        #     train_data = centerize_vary_length_series(train_data)
                 
-        train_data = train_data[~np.isnan(train_data).all(axis=2).all(axis=1)]
+        # train_data = train_data[~np.isnan(train_data).all(axis=2).all(axis=1)]
 
-        multiplier = 1 if train_data.shape[0] >= self.batch_size else math.ceil(self.batch_size / train_data.shape[0])
-        train_dataset = PretrainDataset(torch.from_numpy(train_data).to(torch.float), sigma=0.5, multiplier=multiplier)
-        train_loader = DataLoader(train_dataset, batch_size=min(self.batch_size, len(train_dataset)), shuffle=True, drop_last=True)
+        # multiplier = 1 if train_data.shape[0] >= self.batch_size else math.ceil(self.batch_size / train_data.shape[0])
+        # train_dataset = PretrainDataset(torch.from_numpy(train_data).to(torch.float), sigma=0.5, multiplier=multiplier)
+        # train_loader = DataLoader(train_dataset, batch_size=min(self.batch_size, len(train_dataset)), shuffle=True, drop_last=True)
 
         optimizer = torch.optim.SGD([p for p in self.cost.parameters() if p.requires_grad],
                                     lr=self.lr,
@@ -283,34 +283,35 @@ class CoST:
             n_epoch_iters = 0
             
             interrupted = False
-            for batch in train_loader:
-                if n_iters is not None and self.n_iters >= n_iters:
-                    interrupted = True
-                    break
+            for train_loader in datalist:
+                for batch in train_loader:
+                    # if n_iters is not None and self.n_iters >= n_iters:
+                    #     interrupted = True
+                    #     break
 
-                x_q, x_k = map(lambda x: x.to(self.device), batch)
-                if self.max_train_length is not None and x_q.size(1) > self.max_train_length:
-                    window_offset = np.random.randint(x_q.size(1) - self.max_train_length + 1)
-                    x_q = x_q[:, window_offset : window_offset + self.max_train_length]
-                    x_k = x_k[:, window_offset : window_offset + self.max_train_length]
+                    x_q, x_k = map(lambda x: x.to(self.device), batch)
+                    if self.max_train_length is not None and x_q.size(1) > self.max_train_length:
+                        window_offset = np.random.randint(x_q.size(1) - self.max_train_length + 1)
+                        x_q = x_q[:, window_offset : window_offset + self.max_train_length]
+                        x_k = x_k[:, window_offset : window_offset + self.max_train_length]
 
-                optimizer.zero_grad()
+                    optimizer.zero_grad()
 
-                loss = self.cost(x_q, x_k)
+                    loss = self.cost(x_q, x_k)
 
-                loss.backward()
-                optimizer.step()
+                    loss.backward()
+                    optimizer.step()
 
-                cum_loss += loss.item()
-                n_epoch_iters += 1
-                
-                self.n_iters += 1
-                
-                if self.after_iter_callback is not None:
-                    self.after_iter_callback(self, loss.item())
+                    cum_loss += loss.item()
+                    n_epoch_iters += 1
+                    
+                    self.n_iters += 1
+                    
+                    if self.after_iter_callback is not None:
+                        self.after_iter_callback(self, loss.item())
 
-                if n_iters is not None:
-                    adjust_learning_rate(optimizer, self.lr, self.n_iters, n_iters)
+                    if n_iters is not None:
+                        adjust_learning_rate(optimizer, self.lr, self.n_iters, n_iters)
             
             if interrupted:
                 break

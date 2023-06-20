@@ -7,10 +7,11 @@ import numpy as np
 import tasks
 import datautils
 from utils import init_dl_program, name_with_datetime, pkl_save, data_dropout
+import torch
 
 # import methods
 from cost import CoST
-
+from datautils import setup_seed,set_device
 
 def save_checkpoint_callback(
     save_every=1,
@@ -25,16 +26,16 @@ def save_checkpoint_callback(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset', help='The dataset name')
-    parser.add_argument('run_name', help='The folder name used to save model, output and evaluation metrics. This can be set to any word')
-    parser.add_argument('--archive', type=str, required=True, help='The archive name that the dataset belongs to. This can be set to forecast_csv, or forecast_csv_univar')
+    parser.add_argument('--dataset', default= 'ETTh1',help='The dataset name')
+    parser.add_argument('--run_name',default='forecast_multivar', help='The folder name used to save model, output and evaluation metrics. This can be set to any word')
+    parser.add_argument('--archive', type=str, default='forecast_csv', help='The archive name that the dataset belongs to. This can be set to forecast_csv, or forecast_csv_univar')
     parser.add_argument('--gpu', type=int, default=0, help='The gpu no. used for training and inference (defaults to 0)')
     parser.add_argument('--batch-size', type=int, default=8, help='The batch size (defaults to 8)')
     parser.add_argument('--lr', type=float, default=0.001, help='The learning rate (defaults to 0.001)')
     parser.add_argument('--repr-dims', type=int, default=320, help='The representation dimension (defaults to 320)')
     parser.add_argument('--max-train-length', type=int, default=3000, help='For sequence with a length greater than <max_train_length>, it would be cropped into some sequences, each of which has a length less than <max_train_length> (defaults to 3000)')
     parser.add_argument('--iters', type=int, default=None, help='The number of iterations')
-    parser.add_argument('--epochs', type=int, default=None, help='The number of epochs')
+    parser.add_argument('--epochs', type=int, default=50, help='The number of epochs')
     parser.add_argument('--save-every', type=int, default=None, help='Save the checkpoint every <save_every> iterations/epochs')
     parser.add_argument('--seed', type=int, default=None, help='The random seed')
     parser.add_argument('--max-threads', type=int, default=None, help='The maximum allowed number of threads used by this process')
@@ -42,18 +43,36 @@ if __name__ == '__main__':
 
     parser.add_argument('--kernels', type=int, nargs='+', default=[1, 2, 4, 8, 16, 32, 64, 128], help='The kernel sizes used in the mixture of AR expert layers')
     parser.add_argument('--alpha', type=float, default=0.0005, help='Weighting hyperparameter for loss function')
-
+    ###new
+    parser.add_argument('--muti_dataset',type=str,default='ETTh1_ETTm2')
+    parser.add_argument('--random_seed',type=int,default=None)
     args = parser.parse_args()
 
     print("Dataset:", args.dataset)
     print("Arguments:", str(args))
     
-    device = init_dl_program(args.gpu, seed=args.seed, max_threads=args.max_threads)
+    #device = init_dl_program(args.gpu, seed=args.seed, max_threads=args.max_threads)
+    set_device(device=args.gpu)
+    setup_seed(args.random_seed)
+    device=torch.device(args.gpu)
 
+    run_dir = 'training/' + args.muti_dataset + '_' +'epochs_'+str(args.epochs)+'_seed_'+str(args.random_seed)
+    print(run_dir)
+    os.makedirs(run_dir, exist_ok=True)
+#切割数据集字符
+    if args.muti_dataset:
+        args.muti_dataset=args.muti_dataset.split("_")
+        
     if args.archive == 'forecast_csv':
         task_type = 'forecasting'
-        data, train_slice, valid_slice, test_slice, scaler, pred_lens, n_covariate_cols = datautils.load_forecast_csv(args.dataset)
-        train_data = data[:, train_slice]
+        datalist=[]
+        if args.muti_dataset:
+            for dset in args.muti_dataset:
+                data,train_slice, valid_slice, test_slice, scaler, pred_lens, n_covariate_cols=datautils.load_muti_forecast_csv(args,dset)
+                datalist.append(data)
+        else:
+            data, train_slice, valid_slice, test_slice, scaler, pred_lens, n_covariate_cols = datautils.load_forecast_csv(args.dataset)
+            train_data = data[:, train_slice]
     elif args.archive == 'forecast_csv_univar':
         task_type = 'forecasting'
         data, train_slice, valid_slice, test_slice, scaler, pred_lens, n_covariate_cols = datautils.load_forecast_csv(args.dataset, univar=True)
@@ -79,14 +98,14 @@ if __name__ == '__main__':
         unit = 'epoch' if args.epochs is not None else 'iter'
         config[f'after_{unit}_callback'] = save_checkpoint_callback(args.save_every, unit)
 
-    run_dir = f"training/{args.dataset}/{name_with_datetime(args.run_name)}"
+    # run_dir = f"training/{args.dataset}/{name_with_datetime(args.run_name)}"
 
-    os.makedirs(run_dir, exist_ok=True)
+    #os.makedirs(run_dir, exist_ok=True)
     
     t = time.time()
 
     model = CoST(
-        input_dims=train_data.shape[-1],
+        input_dims=8,
         kernels=args.kernels,
         alpha=args.alpha,
         max_train_length=args.max_train_length,
@@ -95,7 +114,7 @@ if __name__ == '__main__':
     )
 
     loss_log = model.fit(
-        train_data,
+        datalist,
         n_epochs=args.epochs,
         n_iters=args.iters,
         verbose=True

@@ -5,6 +5,8 @@ import torch
 import random
 from datetime import datetime
 import torch.nn as nn
+import json
+import time
 
 
 def pkl_save(name, var):
@@ -127,3 +129,31 @@ def init_dl_program(
         torch.backends.cuda.matmul.allow_tf32 = use_tf32
         
     return devices if len(devices) > 1 else devices[0]
+
+
+def save_one_experiment_result(args, results, path="./exp_results.json"):
+    now = time.time()
+    args = vars(args)
+    experiment_data = {
+        "timestamp": now,
+        "pretrain_data": args['muti_dataset'],
+        "target":args['target'],
+        "results": results,
+    }
+    with open(path, "a") as file:
+        json.dump(experiment_data, file)
+        file.write('\n')
+    print("-" * 25, 'record done', "-" * 25)
+
+def load_experiment_results(path="./exp_results.json"):
+    with open(path, "r") as file:
+        experiments = []
+        for line in file:
+            try:
+                experiment_data = json.loads(line)
+            except:
+                print(line)
+                print(len(line))
+            else:
+                experiments.append(experiment_data)
+    return experiments
